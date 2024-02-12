@@ -1,6 +1,6 @@
 import pandas as pd
 import csv
-# comment
+
 
 class Product:
     def __init__(self, product_id, product_name, product_options, quantity):
