@@ -34,11 +34,11 @@ class Order:
 
 
 def create_new_csv(orders: list[Order]):
-    new_file = 'csv/demars_farms_csa_manifest_2023.csv'
+    new_file = 'csv/output_test.csv'
     try:
         with open(new_file, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['Order #', 'date', 'status', 'first_name', 'last_name', 'email', 'address_1',
+            writer.writerow(['order_number', 'date', 'status', 'first_name', 'last_name', 'email', 'address_1',
                              'address_2', 'postal_code', 'city', 'state', 'country', 'phone', 'products', 'notes',
                              'delivery'])
             for order in orders:
@@ -57,7 +57,7 @@ def get_product_string(products: list[Product]):
         product_item['id'] = product.product_id
         product_item['product'] = product.product_name
         product_item['quantity'] = product.quantity
-        product_item['options'] = product.product_options
+        product_item['Product Options'] = product.product_options
 
         products_list += product_item.__str__()
     return products_list
@@ -93,9 +93,9 @@ def print_order(order):
 
 def build_order(orders_df):
     orders_list = []
-    temp_order_id = orders_df['order_number'][0]
+    temp_order_id = orders_df['Order #'][0]
     for i in range(len(orders_df)):
-        order_number = orders_df['order_number'][i]
+        order_number = orders_df['Order #'][i]
         products = []
         order = Order(order_number='', date='', status='', first_name='', last_name='', email='', address_1='',
                       address_2='', postal_code='', city='', state='', country='', phone='', products=products,
@@ -103,48 +103,48 @@ def build_order(orders_df):
         while temp_order_id == order_number:
 
             # Make Products List
-            if orders_df['product_id'][i] != '':
-                product = Product(product_id=orders_df['product_id'][i],
-                                  product_name=orders_df['product_name'][i],
-                                  product_options=orders_df['product_options'][i],
-                                  quantity=orders_df['quantity'][i])
+            if orders_df['Product Id'][i] != '':
+                product = Product(product_id=orders_df['Product Id'][i],
+                                  product_name=orders_df['Product Name'][i],
+                                  product_options=orders_df['Product Options'][i],
+                                  quantity=orders_df['Product Quantity'][i])
                 products.append(product)
 
             # ORDERS
-            if orders_df['order_number'][i] != '':
-                order.order_number = orders_df['order_number'][i]
-            if orders_df['date'][i] != '':
-                order.date = orders_df['date'][i]
-            if orders_df['status'][i] != '':
-                order.status = orders_df['status'][i]
-            if orders_df['first_name'][i] != '':
-                order.first_name = orders_df['first_name'][i]
-            if orders_df['last_name'][i] != '':
-                order.last_name = orders_df['last_name'][i]
-            if orders_df['email'][i] != '':
-                order.email = orders_df['email'][i]
-            if orders_df['address_1'][i] != '':
-                order.address_1 = orders_df['address_1'][i]
-            if orders_df['address_2'][i] != '':
-                order.address_2 = orders_df['address_2'][i]
-            if orders_df['postal_code'][i] != '':
-                order.postal_code = orders_df['postal_code'][i]
-            if orders_df['city'][i] != '':
-                order.city = orders_df['city'][i]
-            if orders_df['state'][i] != '':
-                order.state = orders_df['state'][i]
-            if orders_df['country'][i] != '':
-                order.country = orders_df['country'][i]
-            if orders_df['phone'][i] != '':
-                order.phone = orders_df['phone'][i]
+            if orders_df['Order #'][i] != '':
+                order.order_number = orders_df['Order #'][i]
+            if orders_df['Date'][i] != '':
+                order.date = orders_df['Date'][i]
+            if orders_df['Status'][i] != '':
+                order.status = orders_df['Status'][i]
+            if orders_df['Shipping First Name'][i] != '':
+                order.first_name = orders_df['Shipping First Name'][i]
+            if orders_df['Shipping Last Name'][i] != '':
+                order.last_name = orders_df['Shipping Last Name'][i]
+            if orders_df['Shipping Email'][i] != '':
+                order.email = orders_df['Shipping Email'][i]
+            if orders_df['Shipping Address'][i] != '':
+                order.address_1 = orders_df['Shipping Address'][i]
+            if orders_df['Shipping Address 2'][i] != '':
+                order.address_2 = orders_df['Shipping Address 2'][i]
+            if orders_df['Shipping Postal Code'][i] != '':
+                order.postal_code = orders_df['Shipping Postal Code'][i]
+            if orders_df['Shipping City'][i] != '':
+                order.city = orders_df['Shipping City'][i]
+            if orders_df['Shipping Region'][i] != '':
+                order.state = orders_df['Shipping Region'][i]
+            if orders_df['Shipping Country'][i] != '':
+                order.country = orders_df['Shipping Country'][i]
+            if orders_df['Shipping Phone'][i] != '':
+                order.phone = orders_df['Shipping Phone'][i]
             order.products = products
-            if orders_df['notes'][i] != '':
-                order.notes = orders_df['notes'][i]
-            if orders_df['product_options'][i].find('Delivery') != -1:
+            if orders_df['Order Notes'][i] != '':
+                order.notes = orders_df['Order Notes'][i]
+            if orders_df['Product Options'][i].find('Delivery') != -1:
                 order.delivery = True
 
             if i < len(orders_df) - 1:
-                temp_order_id = orders_df['order_number'][i + 1]
+                temp_order_id = orders_df['Order #'][i + 1]
                 if temp_order_id != order_number:
                     orders_list.append(order)
                 i += 1
@@ -160,7 +160,7 @@ def build_order(orders_df):
 
 def main():
     # Get the file and read it into a DataFrame
-    orders_df = pd.read_csv('~/parse_orders_csv/csv/demars_farms_csa_orders_2023.csv', keep_default_na=False)
+    orders_df = pd.read_csv('~/parse_orders_csv/csv/demars_farms_csa_orders_2023_copy.csv', keep_default_na=False)
 
     # Pass the DataFrame to our build_order function which will return a list of orders
     orders_list = build_order(orders_df)
