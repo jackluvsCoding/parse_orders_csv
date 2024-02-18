@@ -1,11 +1,14 @@
 import pandas as pd
 
 from functions import *
+from tkinter import filedialog
 
 
 def main():
+    file_path_string = filedialog.askopenfilename()
     # Get the file and read it into a DataFrame
-    orders_df = pd.read_csv('~/parse_orders_csv/csv/demars_farms_csa_orders_2023_copy.csv', keep_default_na=False)
+    # orders_df = pd.read_csv('~/parse_orders_csv/csv/demars_farms_csa_orders_2023_copy.csv', keep_default_na=False)
+    orders_df = pd.read_csv(file_path_string, keep_default_na=False)
 
     # Pass the DataFrame to our build_order function which will return a list of orders
     orders_list = build_order(orders_df)
