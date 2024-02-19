@@ -1,5 +1,6 @@
 import pandas as pd
 
+from file_io import open_file_after_created
 from functions import *
 from tkinter import filedialog
 
@@ -15,12 +16,14 @@ def main():
     orders_list = build_order(orders_df)
 
     # Print Orders in Console to Review
-    print(f"THERE ARE {len(orders_list)} ORDERS:")
-    for order in orders_list:
-        print_order(order)
+    print_orders_to_console(orders_list)
 
     # Build a new CSV file with the list of orders
-    create_new_csv(orders_list)
+    file = create_new_csv(orders_list)
+    print(f"FILE: {file}")
+
+    # Open the file for user to view
+    open_file_after_created(file)
 
 
 if __name__ == '__main__':

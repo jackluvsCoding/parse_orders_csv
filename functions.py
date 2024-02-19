@@ -5,8 +5,10 @@ from file_io import asksaveasfile_csv_wrapper
 
 
 def create_new_csv(orders: list[Order]):
+    file = asksaveasfile_csv_wrapper()
+
     try:
-        with open(asksaveasfile_csv_wrapper(), 'w', newline='') as f:
+        with open(file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['order_number', 'date', 'status', 'first_name', 'last_name', 'email', 'address_1',
                              'address_2', 'postal_code', 'city', 'state', 'country', 'phone', 'products', 'notes',
@@ -16,8 +18,12 @@ def create_new_csv(orders: list[Order]):
                                  order.email, order.address_1, order.address_2, order.postal_code, order.city,
                                  order.state, order.country, order.phone, get_product_string(order.products),
                                  order.notes, order.delivery])
+            f.close()
+
     except Exception as e:
         raise Exception(e)
+
+    return file
 
 
 def get_product_string(products: list[Product]):
@@ -126,3 +132,9 @@ def build_order(orders_df):
         if i == len(orders_df):
             break
     return orders_list
+
+
+def print_orders_to_console(orders_list: list):
+    print(f"THERE ARE {len(orders_list)} ORDERS:")
+    for order in orders_list:
+        print_order(order)
