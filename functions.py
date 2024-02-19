@@ -1,11 +1,12 @@
 import csv
 from classes import *
 
+from file_io import asksaveasfile_csv_wrapper
+
 
 def create_new_csv(orders: list[Order]):
-    new_file = 'csv/output_test.csv'
     try:
-        with open(new_file, 'w', newline='') as f:
+        with open(asksaveasfile_csv_wrapper(), 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['order_number', 'date', 'status', 'first_name', 'last_name', 'email', 'address_1',
                              'address_2', 'postal_code', 'city', 'state', 'country', 'phone', 'products', 'notes',
