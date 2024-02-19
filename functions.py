@@ -1,10 +1,11 @@
 import csv
-from classes import *
 
+from objects.order import Order
+from objects.product import Product
 from file_io import asksaveasfile_csv_wrapper
 
 
-def create_new_csv(orders: list[Order]):
+def create_new_orders_csv(orders: list[Order]):
     file = asksaveasfile_csv_wrapper()
 
     try:
@@ -37,34 +38,6 @@ def get_product_string(products: list[Product]):
 
         products_list += product_item.__str__()
     return products_list
-
-
-def print_order(order):
-    products = ''
-    for product in order.products:
-
-        product_item = (f"\tid:      {product.product_id}\n"
-                        f"\tproduct: {product.product_name}\n"
-                        f"\tqty:     {product.quantity}\n"
-                        f"\toptions: {product.product_options}\n")
-        products += product_item
-
-    print(f"\norder_number:\t{order.order_number}\n"
-          f"date:\t{order.date}\n"
-          f"status:\t{order.status}\n"
-          f"first_name:\t{order.first_name}\n"
-          f"last_name:\t{order.last_name}\n"
-          f"email:\t{order.email}\n"
-          f"address_1:\t{order.address_1}\n"
-          f"address_2:\t{order.address_2}\n"
-          f"postal_code:\t{order.postal_code}\n"
-          f"city:\t{order.city}\n"
-          f"state:\t{order.state}\n"
-          f"country:\t{order.country}\n"
-          f"phone:\t{order.phone}\n"
-          f"products:\n{products}\n"
-          f"notes:\t{order.notes}\n"
-          f"delivery:\t{order.delivery}\n")
 
 
 def build_order(orders_df):
@@ -119,11 +92,13 @@ def build_order(orders_df):
             if orders_df['Product Options'][i].find('Delivery') != -1:
                 order.delivery = True
 
+            # If there are more orders, increment 'i' and return to the head of the loop
             if i < len(orders_df) - 1:
                 temp_order_id = orders_df['Order #'][i + 1]
                 if temp_order_id != order_number:
                     orders_list.append(order)
                 i += 1
+            # If there are no more orders, break out of the loop
             else:
                 if i == len(orders_df) - 1:
                     orders_list.append(order)
@@ -134,7 +109,7 @@ def build_order(orders_df):
     return orders_list
 
 
-def print_orders_to_console(orders_list: list):
-    print(f"THERE ARE {len(orders_list)} ORDERS:")
+def print_orders_to_console(orders_list: list[Order]):
+    print(f"PRINTING {len(orders_list)} ORDERS TO THE CONSOLE:")
     for order in orders_list:
-        print_order(order)
+        order.print_order()

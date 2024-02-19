@@ -2,12 +2,12 @@ import pandas as pd
 
 from file_io import open_file_after_created
 from functions import *
-from tkinter import filedialog
+from tkinter import filedialog as fd
 
 
 def main():
     # Select file from finder to create orders
-    file_path_string = filedialog.askopenfilename()
+    file_path_string = fd.askopenfilename()
 
     # Get the file and read it into a DataFrame
     orders_df = pd.read_csv(file_path_string, keep_default_na=False)
@@ -19,8 +19,7 @@ def main():
     print_orders_to_console(orders_list)
 
     # Build a new CSV file with the list of orders
-    file = create_new_csv(orders_list)
-    print(f"FILE: {file}")
+    file = create_new_orders_csv(orders_list)
 
     # Open the file for user to view
     open_file_after_created(file)
