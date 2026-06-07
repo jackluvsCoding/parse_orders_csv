@@ -1,2 +1,29 @@
-# CSV Files #
-*.csv
+# Python bytecode/cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+playground/
+
+# Build/distribution artifacts
+build/
+dist/
+*.egg-info/
+
+# Local IDE/editor files
+.idea/
+.vscode/
+.DS_Store
+
+# Generated CSA output files
+# These are created by the app and should usually stay out of git.
+*Generated*.xlsx
+*Optimo Import*.csv
+
+# Test/output scratch space
+output/
+tmp/
