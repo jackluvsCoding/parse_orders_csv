@@ -113,25 +113,15 @@ def _use_delivery_override(override: str) -> bool:
     return bool(re.search(r"\d", text) and len(text) >= 8)
 
 
-def _build_driver_notes(row) -> str:
-    parts = []
-    share = row.get("share_size", "")
-    fulfillment = row.get("fulfillment", "")
-    category = row.get("fulfillment_category", "")
+def _build_notes(share_size: str, order_notes: str) -> str:
+    share = _clean(share_size)
+    notes = _clean(order_notes)
 
-    if category == "drop_site":
-        parts.append(f"[{fulfillment.upper()}]: {share}" if share else f"[{fulfillment.upper()}]")
-    elif share:
-        parts.append(share)
-
-    if row.get("allergies"):
-        parts.append(f"Allergies: {row['allergies']}")
-    if row.get("preferences"):
-        parts.append(f"Preferences: {row['preferences']}")
-    if row.get("notes"):
-        parts.append(row["notes"])
-
-    return ": ".join(part for part in parts if part)
+    if share and notes:
+        return f"{share}: {notes}"
+    if share:
+        return f"{share}:"
+    return notes
 
 
 def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
@@ -175,6 +165,9 @@ def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
 
         first_name = _first_non_empty(group["Shipping First Name"])
         last_name = _first_non_empty(group["Shipping Last Name"])
+        share_size = _share_size(primary_product.get("product_name", ""))
+        order_notes = _first_non_empty(group["Order Notes"])
+
         record = {
             "order_number": _clean(order_number),
             "date": _first_non_empty(group["Date"]),
@@ -196,7 +189,7 @@ def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
             "product_name": primary_product.get("product_name", ""),
             "quantity": primary_product.get("quantity", ""),
             "product_options": options,
-            "share_size": _share_size(primary_product.get("product_name", "")),
+            "share_size": share_size,
             "pickup_drop_site": pickup_site,
             "delivery_address_override": delivery_override,
             "allergies": allergies,
@@ -206,12 +199,27 @@ def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
             "site_name": site_name,
             "site_address": site_address,
             "optimo_address": optimo_address,
-            "notes": _first_non_empty(group["Order Notes"]),
+            "order_notes": order_notes,
+            "notes": _build_notes(share_size, order_notes),
         }
-        record["driver_notes"] = _build_driver_notes(record)
         records.append(record)
 
     return pd.DataFrame(records)
+
+
+def build_working_orders_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "location_name",
+        "email",
+        "phone",
+        "address",
+        "product_name",
+        "fulfillment",
+        "quantity",
+        "allergies",
+        "notes",
+    ]
+    return clean_orders_df.loc[:, columns].copy()
 
 
 def build_optimo_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
@@ -222,7 +230,7 @@ def build_optimo_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
         "email": routable["email"],
         "phone": routable["phone"],
         "fulfillment": routable["fulfillment"],
-        "notes": routable["driver_notes"],
+        "notes": routable["notes"],
     })
 
 
@@ -290,9 +298,9 @@ def create_orders_workbook(orders_df: pd.DataFrame, output_path: Optional[str] =
     review_needed = build_review_needed_dataframe(clean_orders)
     summary = build_summary_dataframe(clean_orders)
 
-    pickups = clean_orders[clean_orders["fulfillment_category"] == "pickup"].copy()
-    deliveries = clean_orders[clean_orders["fulfillment_category"] == "delivery"].copy()
-    drops = clean_orders[clean_orders["fulfillment_category"] == "drop_site"].copy()
+    pickups = build_working_orders_dataframe(clean_orders[clean_orders["fulfillment_category"] == "pickup"].copy())
+    deliveries = build_working_orders_dataframe(clean_orders[clean_orders["fulfillment_category"] == "delivery"].copy())
+    drops = build_working_orders_dataframe(clean_orders[clean_orders["fulfillment_category"] == "drop_site"].copy())
 
     sheets = {
         "Raw Import": orders_df,
