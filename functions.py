@@ -1,7 +1,7 @@
 import csv
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -29,9 +29,8 @@ def _first_non_empty(series) -> str:
 
 def _format_address(address_1: str, address_2: str, city: str, state: str, postal_code: str) -> str:
     street = ", ".join(part for part in [_clean(address_1), _clean(address_2)] if part)
-    city_state_zip = " ".join(
-        part for part in [", ".join(part for part in [_clean(city), _clean(state)] if part), _clean(postal_code)] if part
-    )
+    city_state = ", ".join(part for part in [_clean(city), _clean(state)] if part)
+    city_state_zip = " ".join(part for part in [city_state, _clean(postal_code)] if part)
     return ", ".join(part for part in [street, city_state_zip] if part)
 
 
@@ -57,7 +56,7 @@ def _share_size(product_name: str) -> str:
     return ""
 
 
-def _site_name_and_address(site: str) -> tuple[str, str]:
+def _site_name_and_address(site: str):
     site = _clean(site)
     if not site:
         return "", ""
@@ -72,7 +71,7 @@ def _site_name_and_address(site: str) -> tuple[str, str]:
     return site_without_day, ""
 
 
-def _fulfillment(product_name: str, pickup_site: str) -> tuple[str, str, str, str]:
+def _fulfillment(product_name: str, pickup_site: str):
     product = _clean(product_name)
     site_name, site_address = _site_name_and_address(pickup_site)
     site_lower = site_name.lower()
@@ -98,7 +97,7 @@ def _fulfillment(product_name: str, pickup_site: str) -> tuple[str, str, str, st
     return f"{site_name} Drop", "drop_site", site_name, site_address
 
 
-def _product_string(products: list[dict[str, str]]) -> str:
+def _product_string(products):
     return "".join(str({
         "id": item.get("product_id", ""),
         "product": item.get("product_name", ""),
@@ -114,8 +113,8 @@ def _use_delivery_override(override: str) -> bool:
     return bool(re.search(r"\d", text) and len(text) >= 8)
 
 
-def _build_driver_notes(row: dict[str, str]) -> str:
-    parts: list[str] = []
+def _build_driver_notes(row) -> str:
+    parts = []
     share = row.get("share_size", "")
     fulfillment = row.get("fulfillment", "")
     category = row.get("fulfillment_category", "")
@@ -137,12 +136,12 @@ def _build_driver_notes(row: dict[str, str]) -> str:
 
 def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
     df = orders_df.copy().fillna("")
-    records: list[dict[str, str]] = []
+    records = []
 
     for order_number, group in df.groupby("Order #", sort=False):
         group = group.fillna("")
         product_rows = group[group["Product Id"].astype(str).str.strip() != ""]
-        products: list[dict[str, str]] = []
+        products = []
 
         for _, product_row in product_rows.iterrows():
             products.append({
@@ -228,9 +227,9 @@ def build_optimo_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_review_needed_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
-    issues: list[dict[str, str]] = []
+    issues = []
     for _, row in clean_orders_df.iterrows():
-        row_issues: list[str] = []
+        row_issues = []
         if not row.get("email"):
             row_issues.append("Missing email")
         if not row.get("phone"):
@@ -271,7 +270,7 @@ def build_summary_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
-def _autosize_excel_columns(writer, sheets: dict[str, pd.DataFrame]) -> None:
+def _autosize_excel_columns(writer, sheets) -> None:
     for sheet_name, dataframe in sheets.items():
         worksheet = writer.sheets[sheet_name]
         for column_index, column_name in enumerate(dataframe.columns):
@@ -282,7 +281,7 @@ def _autosize_excel_columns(writer, sheets: dict[str, pd.DataFrame]) -> None:
         worksheet.autofilter(0, 0, max(len(dataframe), 1), max(len(dataframe.columns) - 1, 0))
 
 
-def create_orders_workbook(orders_df: pd.DataFrame, output_path: str | None = None) -> str:
+def create_orders_workbook(orders_df: pd.DataFrame, output_path: Optional[str] = None) -> str:
     if output_path is None:
         output_path = asksaveasfile_xlsx_wrapper()
 
