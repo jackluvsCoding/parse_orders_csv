@@ -1,28 +1,24 @@
 import pandas as pd
+from tkinter import filedialog as fd
 
 from file_io import open_file_after_created
-from functions import *
-from tkinter import filedialog as fd
+from functions import create_orders_workbook
 
 
 def main():
-    # Select file from finder to create orders
-    file_path_string = fd.askopenfilename()
+    file_path_string = fd.askopenfilename(
+        title="Select Weebly orders CSV export",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+    )
 
-    # Get the file and read it into a DataFrame
-    orders_df = pd.read_csv(file_path_string, keep_default_na=False)
+    if not file_path_string:
+        print("No input file selected.")
+        return
 
-    # Pass the DataFrame to our build_order function which will return a list of orders
-    orders_list = build_order(orders_df)
-
-    # Print Orders in Console to Review
-    print_orders_to_console(orders_list)
-
-    # Build a new CSV file with the list of orders
-    file = create_new_orders_csv(orders_list)
-
-    # Open the file for user to view
-    open_file_after_created(file)
+    orders_df = pd.read_csv(file_path_string, keep_default_na=False, dtype=str)
+    output_file = create_orders_workbook(orders_df)
+    print(f"Created workbook: {output_file}")
+    open_file_after_created(output_file)
 
 
 if __name__ == '__main__':
