@@ -1,115 +1,342 @@
 import csv
+import re
+from pathlib import Path
+from typing import Any
 
-from objects.order import Order
-from objects.product import Product
-from file_io import asksaveasfile_csv_wrapper
+import pandas as pd
+
+from file_io import asksaveasfile_csv_wrapper, asksaveasfile_xlsx_wrapper
 
 
-def create_new_orders_csv(orders: list[Order]):
+def _clean(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"nan", "none"}:
+        return ""
+    if text.endswith(".0") and text[:-2].isdigit():
+        return text[:-2]
+    return text
+
+
+def _first_non_empty(series) -> str:
+    for value in series:
+        text = _clean(value)
+        if text:
+            return text
+    return ""
+
+
+def _format_address(address_1: str, address_2: str, city: str, state: str, postal_code: str) -> str:
+    street = ", ".join(part for part in [_clean(address_1), _clean(address_2)] if part)
+    city_state_zip = " ".join(
+        part for part in [", ".join(part for part in [_clean(city), _clean(state)] if part), _clean(postal_code)] if part
+    )
+    return ", ".join(part for part in [street, city_state_zip] if part)
+
+
+def _extract_option(options: str, label: str) -> str:
+    labels = [
+        "Pickup/Drop Site",
+        "Delivery Address (If different from billing)",
+        "Allergies (We will do our best to accommodate allergies, but cannot guarantee produce is free of cross contamination)",
+        "Preferences (We will do our best to accommodate preferences, but cannot guarantee replacement items)",
+    ]
+    next_labels = "|".join(re.escape(item) for item in labels if item != label)
+    pattern = rf"{re.escape(label)}\s*:\s*(.*?)(?=,\s*(?:{next_labels})\s*:|$)"
+    match = re.search(pattern, options or "", flags=re.IGNORECASE | re.DOTALL)
+    return _clean(match.group(1)) if match else ""
+
+
+def _share_size(product_name: str) -> str:
+    name = _clean(product_name).lower()
+    if name.startswith("full"):
+        return "Full"
+    if name.startswith("half"):
+        return "Half"
+    return ""
+
+
+def _site_name_and_address(site: str) -> tuple[str, str]:
+    site = _clean(site)
+    if not site:
+        return "", ""
+
+    site_without_day = re.sub(r"\s*\([^)]*\)\s*$", "", site).strip()
+    pieces = [part.strip() for part in site_without_day.split(" - ") if part.strip()]
+
+    # Many Weebly options are formatted as "Site Name - Street, City, ST ZIP".
+    if len(pieces) >= 2 and re.search(r"\d", pieces[-1]):
+        return " - ".join(pieces[:-1]), pieces[-1]
+
+    return site_without_day, ""
+
+
+def _fulfillment(product_name: str, pickup_site: str) -> tuple[str, str, str, str]:
+    product = _clean(product_name)
+    site_name, site_address = _site_name_and_address(pickup_site)
+    site_lower = site_name.lower()
+
+    if "[delivery]" in product.lower():
+        return "Delivery", "delivery", "", ""
+
+    if not site_name:
+        return "Unknown", "unknown", "", ""
+
+    if "demars farms" in site_lower:
+        return "Farm Pickup", "pickup", site_name, site_address
+    if "farmers market" in site_lower:
+        return "Elk River Farmers Market", "pickup", site_name, site_address
+    if "roseville" in site_lower:
+        return "Roseville Drop", "drop_site", site_name, site_address
+    if "grind" in site_lower:
+        return f"{site_name} Drop", "drop_site", site_name, site_address
+    if "connexus" in site_lower:
+        return "Connexus Energy Ramsey Drop", "drop_site", site_name, site_address
+
+    # Default new/unknown pickup-site options to drop sites so they are visible in routing prep.
+    return f"{site_name} Drop", "drop_site", site_name, site_address
+
+
+def _product_string(products: list[dict[str, str]]) -> str:
+    return "".join(str({
+        "id": item.get("product_id", ""),
+        "product": item.get("product_name", ""),
+        "quantity": item.get("quantity", ""),
+        "Product Options": item.get("product_options", ""),
+    }) for item in products)
+
+
+def _use_delivery_override(override: str) -> bool:
+    text = _clean(override).lower()
+    if not text or text in {"same", "n/a", "na", "none", "no", "non"}:
+        return False
+    return bool(re.search(r"\d", text) and len(text) >= 8)
+
+
+def _build_driver_notes(row: dict[str, str]) -> str:
+    parts: list[str] = []
+    share = row.get("share_size", "")
+    fulfillment = row.get("fulfillment", "")
+    category = row.get("fulfillment_category", "")
+
+    if category == "drop_site":
+        parts.append(f"[{fulfillment.upper()}]: {share}" if share else f"[{fulfillment.upper()}]")
+    elif share:
+        parts.append(share)
+
+    if row.get("allergies"):
+        parts.append(f"Allergies: {row['allergies']}")
+    if row.get("preferences"):
+        parts.append(f"Preferences: {row['preferences']}")
+    if row.get("notes"):
+        parts.append(row["notes"])
+
+    return ": ".join(part for part in parts if part)
+
+
+def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
+    df = orders_df.copy().fillna("")
+    records: list[dict[str, str]] = []
+
+    for order_number, group in df.groupby("Order #", sort=False):
+        group = group.fillna("")
+        product_rows = group[group["Product Id"].astype(str).str.strip() != ""]
+        products: list[dict[str, str]] = []
+
+        for _, product_row in product_rows.iterrows():
+            products.append({
+                "product_id": _clean(product_row.get("Product Id", "")),
+                "product_name": _clean(product_row.get("Product Name", "")),
+                "product_options": _clean(product_row.get("Product Options", "")),
+                "quantity": _clean(product_row.get("Product Quantity", "")),
+            })
+
+        primary_product = products[0] if products else {"product_id": "", "product_name": "", "product_options": "", "quantity": ""}
+        options = primary_product.get("product_options", "")
+        pickup_site = _extract_option(options, "Pickup/Drop Site")
+        delivery_override = _extract_option(options, "Delivery Address (If different from billing)")
+        allergies = _extract_option(options, "Allergies (We will do our best to accommodate allergies, but cannot guarantee produce is free of cross contamination)")
+        preferences = _extract_option(options, "Preferences (We will do our best to accommodate preferences, but cannot guarantee replacement items)")
+        fulfillment, category, site_name, site_address = _fulfillment(primary_product.get("product_name", ""), pickup_site)
+
+        address_1 = _first_non_empty(group["Shipping Address"])
+        address_2 = _first_non_empty(group["Shipping Address 2"])
+        city = _first_non_empty(group["Shipping City"])
+        state = _first_non_empty(group["Shipping Region"])
+        postal_code = _first_non_empty(group["Shipping Postal Code"])
+        customer_address = _format_address(address_1, address_2, city, state, postal_code)
+
+        if category == "drop_site":
+            optimo_address = site_address
+        elif category == "delivery" and _use_delivery_override(delivery_override):
+            optimo_address = delivery_override.replace("\n", ", ")
+        else:
+            optimo_address = customer_address
+
+        first_name = _first_non_empty(group["Shipping First Name"])
+        last_name = _first_non_empty(group["Shipping Last Name"])
+        record = {
+            "order_number": _clean(order_number),
+            "date": _first_non_empty(group["Date"]),
+            "status": _first_non_empty(group["Status"]),
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": _first_non_empty(group["Shipping Email"]),
+            "address_1": address_1,
+            "address_2": address_2,
+            "postal_code": postal_code,
+            "city": city,
+            "state": state,
+            "country": _first_non_empty(group["Shipping Country"]),
+            "phone": _first_non_empty(group["Shipping Phone"]),
+            "location_name": " ".join(part for part in [first_name, last_name] if part),
+            "address": customer_address,
+            "products": _product_string(products),
+            "product_id": primary_product.get("product_id", ""),
+            "product_name": primary_product.get("product_name", ""),
+            "quantity": primary_product.get("quantity", ""),
+            "product_options": options,
+            "share_size": _share_size(primary_product.get("product_name", "")),
+            "pickup_drop_site": pickup_site,
+            "delivery_address_override": delivery_override,
+            "allergies": allergies,
+            "preferences": preferences,
+            "fulfillment": fulfillment,
+            "fulfillment_category": category,
+            "site_name": site_name,
+            "site_address": site_address,
+            "optimo_address": optimo_address,
+            "notes": _first_non_empty(group["Order Notes"]),
+        }
+        record["driver_notes"] = _build_driver_notes(record)
+        records.append(record)
+
+    return pd.DataFrame(records)
+
+
+def build_optimo_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
+    routable = clean_orders_df[clean_orders_df["fulfillment_category"].isin(["delivery", "drop_site"])].copy()
+    return pd.DataFrame({
+        "Location": routable["location_name"],
+        "Address": routable["optimo_address"],
+        "email": routable["email"],
+        "phone": routable["phone"],
+        "fulfillment": routable["fulfillment"],
+        "notes": routable["driver_notes"],
+    })
+
+
+def build_review_needed_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
+    issues: list[dict[str, str]] = []
+    for _, row in clean_orders_df.iterrows():
+        row_issues: list[str] = []
+        if not row.get("email"):
+            row_issues.append("Missing email")
+        if not row.get("phone"):
+            row_issues.append("Missing phone")
+        if row.get("fulfillment_category") == "unknown":
+            row_issues.append("Unknown fulfillment - update parsing/config")
+        if row.get("fulfillment_category") == "delivery" and not row.get("optimo_address"):
+            row_issues.append("Delivery order missing address")
+        override = row.get("delivery_address_override", "")
+        if override and not _use_delivery_override(override) and _clean(override).lower() not in {"same", "none", "n/a", "na", "no", "non"}:
+            row_issues.append(f"Check delivery address override: {override}")
+        if row.get("fulfillment_category") == "drop_site" and not row.get("site_address"):
+            row_issues.append("Drop site missing route address")
+        if not row.get("share_size"):
+            row_issues.append("Could not parse share size")
+
+        if row_issues:
+            issues.append({
+                "order_number": row.get("order_number", ""),
+                "customer": row.get("location_name", ""),
+                "fulfillment": row.get("fulfillment", ""),
+                "issues": "; ".join(row_issues),
+                "product_options": row.get("product_options", ""),
+                "notes": row.get("notes", ""),
+            })
+
+    return pd.DataFrame(issues)
+
+
+def build_summary_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame:
+    summary = (
+        clean_orders_df
+        .groupby(["fulfillment_category", "fulfillment", "share_size"], dropna=False)
+        .size()
+        .reset_index(name="order_count")
+        .sort_values(["fulfillment_category", "fulfillment", "share_size"])
+    )
+    return summary
+
+
+def _autosize_excel_columns(writer, sheets: dict[str, pd.DataFrame]) -> None:
+    for sheet_name, dataframe in sheets.items():
+        worksheet = writer.sheets[sheet_name]
+        for column_index, column_name in enumerate(dataframe.columns):
+            values = dataframe[column_name].astype(str).head(200).tolist()
+            max_length = max([len(str(column_name)), *(len(value) for value in values)] or [10])
+            worksheet.set_column(column_index, column_index, min(max(max_length + 2, 10), 45))
+        worksheet.freeze_panes(1, 0)
+        worksheet.autofilter(0, 0, max(len(dataframe), 1), max(len(dataframe.columns) - 1, 0))
+
+
+def create_orders_workbook(orders_df: pd.DataFrame, output_path: str | None = None) -> str:
+    if output_path is None:
+        output_path = asksaveasfile_xlsx_wrapper()
+
+    clean_orders = build_clean_orders_dataframe(orders_df)
+    optimo = build_optimo_dataframe(clean_orders)
+    review_needed = build_review_needed_dataframe(clean_orders)
+    summary = build_summary_dataframe(clean_orders)
+
+    pickups = clean_orders[clean_orders["fulfillment_category"] == "pickup"].copy()
+    deliveries = clean_orders[clean_orders["fulfillment_category"] == "delivery"].copy()
+    drops = clean_orders[clean_orders["fulfillment_category"] == "drop_site"].copy()
+
+    sheets = {
+        "Raw Import": orders_df,
+        "All Orders - Clean": clean_orders,
+        "All Pickups": pickups,
+        "All Deliveries": deliveries,
+        "All Drops": drops,
+        "Optimo Import": optimo,
+        "Review Needed": review_needed,
+        "Summary": summary,
+    }
+
+    with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+        for sheet_name, dataframe in sheets.items():
+            dataframe.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+        _autosize_excel_columns(writer, {name[:31]: df for name, df in sheets.items()})
+
+    optimo_csv_path = str(Path(output_path).with_name(f"{Path(output_path).stem} - Optimo Import.csv"))
+    optimo.to_csv(optimo_csv_path, index=False)
+    return output_path
+
+
+# Legacy CSV export retained in case you still need the older output shape.
+def create_new_orders_csv(orders):
     file = asksaveasfile_csv_wrapper()
-
-    try:
-        with open(file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['order_number', 'date', 'status', 'first_name', 'last_name', 'email', 'address_1',
-                             'address_2', 'postal_code', 'city', 'state', 'country', 'phone', 'products', 'notes',
-                             'delivery'])
-            for order in orders:
-                writer.writerow([order.order_number, order.date, order.status, order.first_name, order.last_name,
-                                 order.email, order.address_1, order.address_2, order.postal_code, order.city,
-                                 order.state, order.country, order.phone, get_product_string(order.products),
-                                 order.notes, order.delivery])
-            f.close()
-
-    except Exception as e:
-        raise Exception(e)
-
+    with open(file, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "order_number", "date", "status", "first_name", "last_name", "email", "address_1",
+            "address_2", "postal_code", "city", "state", "country", "phone", "products", "notes",
+            "delivery",
+        ])
+        for order in orders:
+            writer.writerow([
+                order.order_number, order.date, order.status, order.first_name, order.last_name,
+                order.email, order.address_1, order.address_2, order.postal_code, order.city,
+                order.state, order.country, order.phone, getattr(order, "products", ""),
+                order.notes, order.delivery,
+            ])
     return file
 
 
-def get_product_string(products: list[Product]):
-    products_list = ''
-    product_item = {}
-    for product in products:
-        product_item['id'] = product.product_id
-        product_item['product'] = product.product_name
-        product_item['quantity'] = product.quantity
-        product_item['Product Options'] = product.product_options
-
-        products_list += product_item.__str__()
-    return products_list
-
-
-def build_order(orders_df):
-    orders_list = []
-    temp_order_id = orders_df['Order #'][0]
-    for i in range(len(orders_df)):
-        order_number = orders_df['Order #'][i]
-        products = []
-        order = Order(order_number='', date='', status='', first_name='', last_name='', email='', address_1='',
-                      address_2='', postal_code='', city='', state='', country='', phone='', products=products,
-                      notes='')
-        while temp_order_id == order_number:
-
-            # Make Products List
-            if orders_df['Product Id'][i] != '':
-                product = Product(product_id=orders_df['Product Id'][i],
-                                  product_name=orders_df['Product Name'][i],
-                                  product_options=orders_df['Product Options'][i],
-                                  quantity=orders_df['Product Quantity'][i])
-                products.append(product)
-
-            # ORDERS
-            if orders_df['Order #'][i] != '':
-                order.order_number = orders_df['Order #'][i]
-            if orders_df['Date'][i] != '':
-                order.date = orders_df['Date'][i]
-            if orders_df['Status'][i] != '':
-                order.status = orders_df['Status'][i]
-            if orders_df['Shipping First Name'][i] != '':
-                order.first_name = orders_df['Shipping First Name'][i]
-            if orders_df['Shipping Last Name'][i] != '':
-                order.last_name = orders_df['Shipping Last Name'][i]
-            if orders_df['Shipping Email'][i] != '':
-                order.email = orders_df['Shipping Email'][i]
-            if orders_df['Shipping Address'][i] != '':
-                order.address_1 = orders_df['Shipping Address'][i]
-            if orders_df['Shipping Address 2'][i] != '':
-                order.address_2 = orders_df['Shipping Address 2'][i]
-            if orders_df['Shipping Postal Code'][i] != '':
-                order.postal_code = orders_df['Shipping Postal Code'][i]
-            if orders_df['Shipping City'][i] != '':
-                order.city = orders_df['Shipping City'][i]
-            if orders_df['Shipping Region'][i] != '':
-                order.state = orders_df['Shipping Region'][i]
-            if orders_df['Shipping Country'][i] != '':
-                order.country = orders_df['Shipping Country'][i]
-            if orders_df['Shipping Phone'][i] != '':
-                order.phone = orders_df['Shipping Phone'][i]
-            order.products = products
-            if orders_df['Order Notes'][i] != '':
-                order.notes = orders_df['Order Notes'][i]
-            if orders_df['Product Options'][i].find('Delivery') != -1:
-                order.delivery = True
-
-            # If there are more orders, increment 'i' and return to the head of the loop
-            if i < len(orders_df) - 1:
-                temp_order_id = orders_df['Order #'][i + 1]
-                if temp_order_id != order_number:
-                    orders_list.append(order)
-                i += 1
-            # If there are no more orders, break out of the loop
-            else:
-                if i == len(orders_df) - 1:
-                    orders_list.append(order)
-                    i += 1
-                break
-        if i == len(orders_df):
-            break
-    return orders_list
-
-
-def print_orders_to_console(orders_list: list[Order]):
+def print_orders_to_console(orders_list):
     print(f"PRINTING {len(orders_list)} ORDERS TO THE CONSOLE:")
     for order in orders_list:
         order.print_order()
