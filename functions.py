@@ -8,6 +8,9 @@ import pandas as pd
 from file_io import asksaveasfile_csv_wrapper, asksaveasfile_xlsx_wrapper
 
 
+IGNORED_OVERRIDE_VALUES = {"same", "n/a", "na", "none", "no", "non"}
+
+
 def _clean(value: Any) -> str:
     if value is None:
         return ""
@@ -32,6 +35,10 @@ def _format_address(address_1: str, address_2: str, city: str, state: str, posta
     city_state = ", ".join(part for part in [_clean(city), _clean(state)] if part)
     city_state_zip = " ".join(part for part in [city_state, _clean(postal_code)] if part)
     return ", ".join(part for part in [street, city_state_zip] if part)
+
+
+def _normalize_for_compare(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", _clean(value).lower())
 
 
 def _extract_option(options: str, label: str) -> str:
@@ -108,7 +115,7 @@ def _product_string(products):
 
 def _use_delivery_override(override: str) -> bool:
     text = _clean(override).lower()
-    if not text or text in {"same", "n/a", "na", "none", "no", "non"}:
+    if not text or text in IGNORED_OVERRIDE_VALUES:
         return False
     return bool(re.search(r"\d", text) and len(text) >= 8)
 
@@ -122,6 +129,24 @@ def _build_notes(share_size: str, order_notes: str) -> str:
     if share:
         return f"{share}:"
     return notes
+
+
+def _choose_delivery_route_address(customer_address: str, delivery_override: str) -> str:
+    """
+    Weebly's shipping address is usually the clean routing address.
+
+    Customers sometimes re-type the delivery override in a free-text product-option field,
+    and those entries can include names, typos, missing spaces, or partial addresses. Use the
+    override only when the clean shipping address is unavailable.
+    """
+    customer_address = _clean(customer_address)
+    delivery_override = _clean(delivery_override)
+
+    if customer_address:
+        return customer_address
+    if _use_delivery_override(delivery_override):
+        return delivery_override.replace("\n", ", ")
+    return ""
 
 
 def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
@@ -158,8 +183,8 @@ def build_clean_orders_dataframe(orders_df: pd.DataFrame) -> pd.DataFrame:
 
         if category == "drop_site":
             optimo_address = site_address
-        elif category == "delivery" and _use_delivery_override(delivery_override):
-            optimo_address = delivery_override.replace("\n", ", ")
+        elif category == "delivery":
+            optimo_address = _choose_delivery_route_address(customer_address, delivery_override)
         else:
             optimo_address = customer_address
 
@@ -247,8 +272,10 @@ def build_review_needed_dataframe(clean_orders_df: pd.DataFrame) -> pd.DataFrame
         if row.get("fulfillment_category") == "delivery" and not row.get("optimo_address"):
             row_issues.append("Delivery order missing address")
         override = row.get("delivery_address_override", "")
-        if override and not _use_delivery_override(override) and _clean(override).lower() not in {"same", "none", "n/a", "na", "no", "non"}:
-            row_issues.append(f"Check delivery address override: {override}")
+        if override and _clean(override).lower() not in IGNORED_OVERRIDE_VALUES:
+            customer_address = row.get("address", "")
+            if _normalize_for_compare(override) != _normalize_for_compare(customer_address):
+                row_issues.append(f"Delivery override present - using shipping address for Optimo: {override}")
         if row.get("fulfillment_category") == "drop_site" and not row.get("site_address"):
             row_issues.append("Drop site missing route address")
         if not row.get("share_size"):
